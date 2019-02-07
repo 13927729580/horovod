@@ -1,5 +1,5 @@
 // Copyright 2016 The TensorFlow Authors. All Rights Reserved.
-// Modifications copyright (C) 2018 Uber Technologies, Inc.
+// Modifications copyright (C) 2019 Uber Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,10 @@ enum MPIDataType {
   HOROVOD_INT16 = 3,
   HOROVOD_INT32 = 4,
   HOROVOD_INT64 = 5,
-  HOROVOD_FLOAT32 = 6,
-  HOROVOD_FLOAT64 = 7,
-  HOROVOD_BOOL = 8
+  HOROVOD_FLOAT16 = 6,
+  HOROVOD_FLOAT32 = 7,
+  HOROVOD_FLOAT64 = 8,
+  HOROVOD_BOOL = 9
 };
 
 const std::string& MPIDataType_Name(MPIDataType value);
@@ -71,15 +72,15 @@ public:
   void set_tensor_shape(const std::vector<int64_t>& value);
   void add_tensor_shape(int64_t value);
 
-  static void ParseFromString(MPIRequest& request, const std::string& input);
-  static void SerializeToString(MPIRequest& request, std::string& output);
+  static void ParseFromBytes(MPIRequest& request, const uint8_t* input);
+  static void SerializeToString(const MPIRequest& request, std::string& output);
 
 private:
-  int32_t request_rank_;
-  RequestType request_type_;
-  MPIDataType tensor_type_;
-  int32_t root_rank_;
-  int32_t device_;
+  int32_t request_rank_ = 0;
+  RequestType request_type_ = RequestType::ALLREDUCE;
+  MPIDataType tensor_type_ = MPIDataType::HOROVOD_UINT8;
+  int32_t root_rank_ = 0;
+  int32_t device_ = 0;
   std::string tensor_name_;
   std::vector<int64_t> tensor_shape_;
 };
@@ -88,13 +89,14 @@ class MPIRequestList {
 public:
   const std::vector<MPIRequest>& requests() const;
   void set_requests(const std::vector<MPIRequest>& value);
-  void add_requests(MPIRequest value);
+  void add_request(const MPIRequest& value);
+  void emplace_request(MPIRequest&& value);
   bool shutdown() const;
   void set_shutdown(bool value);
 
-  static void ParseFromString(MPIRequestList& request_list,
-                              const std::string& input);
-  static void SerializeToString(MPIRequestList& request_list,
+  static void ParseFromBytes(MPIRequestList& request_list,
+                             const uint8_t* input);
+  static void SerializeToString(const MPIRequestList& request_list,
                                 std::string& output);
 
 private:
@@ -106,19 +108,10 @@ private:
 // greater than zero, informing the rank of an operation should be performed
 // now. If the operation requested would result in an error (for example, due
 // to a type or shape mismatch), then the MPIResponse can contain an error and
-// an error message instead. Finally, an MPIResponse can be a DONE message (if
-// there are no more tensors to reduce on this tick of the background loop) or
-// SHUTDOWN if all MPI processes should shut down.
+// an error message instead.
 class MPIResponse {
 public:
-  enum ResponseType {
-    ALLREDUCE = 0,
-    ALLGATHER = 1,
-    BROADCAST = 2,
-    ERROR = 3,
-    DONE = 4,
-    SHUTDOWN = 5
-  };
+  enum ResponseType { ALLREDUCE = 0, ALLGATHER = 1, BROADCAST = 2, ERROR = 3 };
 
   static const std::string& ResponseType_Name(ResponseType value);
 
@@ -127,8 +120,9 @@ public:
 
   // Empty if the type is DONE or SHUTDOWN.
   const std::vector<std::string>& tensor_names() const;
+  const std::string tensor_names_string() const;
   void set_tensor_names(const std::vector<std::string>& value);
-  void add_tensor_names(const std::string& value);
+  void add_tensor_name(const std::string& value);
 
   // Empty unless response_type is ERROR.
   const std::string& error_message() const;
@@ -136,24 +130,47 @@ public:
 
   const std::vector<int32_t>& devices() const;
   void set_devices(const std::vector<int32_t>& value);
-  void add_devices(int32_t value);
+  void add_device(int32_t value);
 
   // Empty unless response_type is ALLGATHER.
   // These tensor sizes are the dimension zero sizes of all the input matrices,
   // indexed by the rank.
   const std::vector<int64_t>& tensor_sizes() const;
   void set_tensor_sizes(const std::vector<int64_t>& value);
-  void add_tensor_sizes(int64_t value);
+  void add_tensor_size(int64_t value);
 
-  static void ParseFromString(MPIResponse& response, const std::string& input);
-  static void SerializeToString(MPIResponse& response, std::string& output);
+  // To fuse multiple allgather responses
+  void add_allgather_response(const MPIResponse& response);
+
+  static void ParseFromBytes(MPIResponse& response, const uint8_t* input);
+  static void SerializeToString(const MPIResponse& response,
+                                std::string& output);
 
 private:
-  ResponseType response_type_;
+  ResponseType response_type_ = ResponseType::ALLREDUCE;
   std::vector<std::string> tensor_names_;
   std::string error_message_;
   std::vector<int32_t> devices_;
   std::vector<int64_t> tensor_sizes_;
+};
+
+class MPIResponseList {
+public:
+  const std::vector<MPIResponse>& responses() const;
+  void set_responses(const std::vector<MPIResponse>& value);
+  void add_response(const MPIResponse& value);
+  void emplace_response(MPIResponse&& value);
+  bool shutdown() const;
+  void set_shutdown(bool value);
+
+  static void ParseFromBytes(MPIResponseList& response_list,
+                             const uint8_t* input);
+  static void SerializeToString(const MPIResponseList& response_list,
+                                std::string& output);
+
+private:
+  std::vector<MPIResponse> responses_;
+  bool shutdown_ = false;
 };
 
 } // namespace common

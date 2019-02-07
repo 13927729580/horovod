@@ -12,7 +12,9 @@ allows you to have a mixture of different NUMA configurations because the defaul
 `-mca pml ob1` and `-mca btl ^openib` flags force the use of TCP for MPI communication.  This avoids many multiprocessing
 issues that Open MPI has with RDMA which typically result in segmentation faults.  Using TCP for MPI does not have
 noticeable performance impact since most of the heavy communication is done by NCCL, which will use RDMA via RoCE or
-InfiniBand if they're available (see [Horovod on GPU](gpus.md)).
+InfiniBand if they're available (see [Horovod on GPU](gpus.md)).  Notable exceptions from this rule are models that heavily
+use `hvd.broadcast()` and `hvd.allgather()` operations.  To make those operations use RDMA, read the [Open MPI with RDMA](#open-mpi-with-rdma)
+section below.
 
 With the `-x` option you can specify (`-x NCCL_DEBUG=INFO`) or copy (`-x LD_LIBRARY_PATH`) an environment variable to all
 the workers.
@@ -38,6 +40,25 @@ $ mpirun -np 16 \
     -mca pml ob1 -mca btl ^openib \
     python train.py
 ```
+
+### Open MPI with RDMA
+
+As noted above, using TCP for MPI communication does not have any significant effects on performance in the majority of cases.
+Models that make heavy use of `hvd.broadcast()` and `hvd.allgather()` operations are exceptions to that rule.
+
+Default Open MPI `openib` BTL that provides RDMA functionality does not work well with MPI multithreading.  In order to use
+RDMA with `openib`, multithreading must be disabled via `-x HOROVOD_MPI_THREADS_DISABLE=1` option.  See the example below:
+
+```bash
+$ mpirun -np 16 \
+    -H server1:4,server2:4,server3:4,server4:4 \
+    -bind-to none -map-by slot \
+    -x NCCL_DEBUG=INFO -x LD_LIBRARY_PATH -x HOROVOD_MPI_THREADS_DISABLE=1 -x PATH \
+    -mca pml ob1 \
+    python train.py
+```
+
+Other MPI RDMA implementations may or may not benefit from disabling multithreading, so please consult vendor documentation.
 
 ### Hangs due to SSH issues
 
@@ -66,7 +87,8 @@ $ ssh-keyscan -t rsa,dsa server1 server2 > ~/.ssh/known_hosts
 Having network interfaces that are not routed can cause Open MPI to hang. An example of such interface is `docker0`.
 
 If you see non-routed interfaces (like `docker0`) in the output of `ifconfig`, you should tell Open MPI and NCCL to not
-use them via the `-mca btl_tcp_if_exclude <interface>[,<interface>]` and `NCCL_SOCKET_IFNAME=^<interface>` parameters.
+use them via the `-mca btl_tcp_if_exclude <interface>[,<interface>]` and `NCCL_SOCKET_IFNAME=^<interface>[,<interface>]`
+parameters.
 
 ```bash
 $ ifconfig
@@ -111,7 +133,7 @@ $ mpirun -np 16 \
     -H server1:4,server2:4,server3:4,server4:4 \
     -bind-to none -map-by slot \
     -x NCCL_DEBUG=INFO -x LD_LIBRARY_PATH -x PATH \
-    -x NCCL_SOCKET_IFNAME=^docker0 \
+    -x NCCL_SOCKET_IFNAME=^lo,docker0 \
     -mca pml ob1 -mca btl ^openib \
     -mca btl_tcp_if_exclude lo,docker0 \
     python train.py

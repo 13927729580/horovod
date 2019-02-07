@@ -31,9 +31,6 @@ workers were early and which were late.
 * *WAIT_FOR_OTHER_TENSOR_DATA* indicates time taken to wait for GPU to finish computing other inputs for other operations
  that are part of the same fusion batch.
 
-* *SCHEDULE* indicates how much time it took to schedule memory copies into and out of the fusion buffer and the NCCL
- operation itself.
-
 * *QUEUE* happens when reduction is done with NCCL, and the previous NCCL operation did not finish yet.
 
 * *MEMCPY_IN_FUSION_BUFFER* and *MEMCPY_OUT_FUSION_BUFFER* indicate time taken to copy data into and out of the fusion 
@@ -41,3 +38,23 @@ workers were early and which were late.
 
 * *NCCL_ALLREDUCE*, *MPI_ALLREDUCE*, *MPI_ALLGATHER*, or *MPI_BCAST* indicate time taken to do the actual operation on GPU 
  (or CPU) and highlights whether the operation was performed using NCCL or pure MPI.
+
+* In case of `HOROVOD_HIERARCHICAL_ALLREDUCE=1`, *NCCL_ALLREDUCE* will become a sequence or a subsequence of *NCCL_REDUCESCATTER*,
+*NCCL_REDUCE*, *MEMCPY_IN_HOST_BUFFER*, *MPI_ALLREDUCE*, *MEMCPY_OUT_HOST_BUFFER*, *NCCL_ALLGATHER*, *NCCL_BCAST*. 
+
+### Adding cycle markers
+
+Horovod performs work in cycles.  These cycles are used to aid [Tensor Fusion](tensor-fusion.md).
+
+Horovod has the ability to record the moment when each cycle starts for debugging of Tensor Fusion.
+
+![Cycle Markers](https://user-images.githubusercontent.com/16640218/51659458-64806100-1f5f-11e9-9a27-ba934ceec75f.png)
+
+Since this information makes timeline view very crowded, it is not enabled by default.
+
+To add cycle markers to the timeline, set the `HOROVOD_TIMELINE_MARK_CYCLES` environment variable to `1`:
+
+```bash
+$ HOROVOD_TIMELINE=/path/to/timeline.json HOROVOD_TIMELINE_MARK_CYCLES=1 \
+    mpirun -np 4 -x HOROVOD_TIMELINE python train.py
+```

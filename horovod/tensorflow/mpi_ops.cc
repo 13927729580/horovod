@@ -40,7 +40,7 @@ namespace tensorflow {
 
 namespace {
 
-Status ConvertStatus(common::Status status) {
+Status ConvertStatus(const common::Status& status) {
   switch (status.type()) {
   case common::OK:
     return Status::OK();
@@ -50,12 +50,14 @@ Status ConvertStatus(common::Status status) {
     return errors::FailedPrecondition(status.reason());
   case common::ABORTED:
     return errors::Aborted(status.reason());
+  case common::INVALID_ARGUMENT:
+    return errors::InvalidArgument(status.reason());
   default:
     return errors::Unknown("Unknown error.");
   }
 }
 
-common::Status ConvertStatus(Status status) {
+common::Status ConvertStatus(const Status& status) {
   switch (status.code()) {
   case error::Code::OK:
     return common::Status::OK();
@@ -65,21 +67,23 @@ common::Status ConvertStatus(Status status) {
     return common::Status::PreconditionError(status.error_message());
   case error::Code::ABORTED:
     return common::Status::Aborted(status.error_message());
+  case error::Code::INVALID_ARGUMENT:
+    return common::Status::InvalidArgument(status.error_message());
   default:
     return common::Status::UnknownError("Unknown error.");
   }
 }
 
+#if HAVE_CUDA
 class TFReadyEvent : public common::ReadyEvent {
 public:
   TFReadyEvent(DeviceContext* device_context);
   bool Ready() const override;
 
 private:
-#if HAVE_CUDA
   std::shared_ptr<perftools::gputools::Event> event_;
-#endif
 };
+#endif
 
 class TFPersistentBuffer : public common::PersistentBuffer {
 public:
@@ -115,27 +119,23 @@ public:
   OpKernelContext* GetKernelContext() const;
 
 private:
-  OpKernelContext* context_;
+  OpKernelContext* context_ = nullptr;
 };
 
-TFReadyEvent::TFReadyEvent(DeviceContext* device_context) {
 #if HAVE_CUDA
+TFReadyEvent::TFReadyEvent(DeviceContext* device_context) {
   auto executor = device_context->stream()->parent();
   auto ready_event = new perftools::gputools::Event(executor);
   ready_event->Init();
   device_context->stream()->ThenRecordEvent(ready_event);
   event_ = std::shared_ptr<perftools::gputools::Event>(ready_event);
-#endif
 }
 
 bool TFReadyEvent::Ready() const {
-#if HAVE_CUDA
   return event_->PollForStatus() !=
          perftools::gputools::Event::Status::kPending;
-#else
-  return true;
-#endif
 }
+#endif
 
 TFPersistentBuffer::TFPersistentBuffer(OpKernelContext* context, int64_t size) {
   tensor_ = std::make_shared<PersistentTensor>();
@@ -184,6 +184,8 @@ const common::MPIDataType TFTensor::dtype() const {
     return common::HOROVOD_INT32;
   case DT_INT64:
     return common::HOROVOD_INT64;
+  case DT_HALF:
+    return common::HOROVOD_FLOAT16;
   case DT_FLOAT:
     return common::HOROVOD_FLOAT32;
   case DT_DOUBLE:
@@ -223,7 +225,7 @@ common::Status
 TFOpContext::AllocateOutput(common::TensorShape shape,
                             std::shared_ptr<common::Tensor>* tensor) {
   TensorShape tf_shape;
-  for (int idx = 0; idx < shape.dims(); idx++) {
+  for (int idx = 0; idx < shape.dims(); ++idx) {
     tf_shape.AddDim(shape.dim_size(idx));
   }
   Tensor* tf_tensor;
@@ -259,7 +261,7 @@ int GetDeviceID(OpKernelContext* context) {
 
 // On GPU this event will signal that data is ready, and tensors are
 // allocated.
-TFReadyEvent* RecordReadyEvent(OpKernelContext* context) {
+common::ReadyEvent* RecordReadyEvent(OpKernelContext* context) {
 #if HAVE_CUDA
   auto device_context = context->op_device_context();
   if (device_context != nullptr) {
@@ -287,7 +289,7 @@ public:
     OP_REQUIRES_OK_ASYNC(
         context, context->allocate_output(0, tensor.shape(), &output), done);
     // ReadyEvent makes sure input tensor is ready, and output is allocated.
-    auto ready_event = std::shared_ptr<TFReadyEvent>(RecordReadyEvent(context));
+    auto ready_event = std::shared_ptr<common::ReadyEvent>(RecordReadyEvent(context));
     auto hvd_context = std::make_shared<TFOpContext>(context);
     auto hvd_tensor = std::make_shared<TFTensor>(tensor);
     auto hvd_output = std::make_shared<TFTensor>(*output);
@@ -309,7 +311,7 @@ REGISTER_KERNEL_BUILDER(Name("HorovodAllreduce").Device(DEVICE_GPU),
 #endif
 
 REGISTER_OP("HorovodAllreduce")
-    .Attr("T: {int32, int64, float32, float64}")
+    .Attr("T: {int32, int64, float16, float32, float64}")
     .Input("tensor: T")
     .Output("sum: T")
     .SetShapeFn([](shape_inference::InferenceContext* c) {
@@ -344,7 +346,7 @@ public:
     // ReadyEvent makes sure input tensor is ready.  We cannot pre-allocate
     // output for allgather, since shape of result is only known after all
     // ranks make a request.
-    auto ready_event = std::shared_ptr<TFReadyEvent>(RecordReadyEvent(context));
+    auto ready_event = std::shared_ptr<common::ReadyEvent>(RecordReadyEvent(context));
     auto hvd_context = std::make_shared<TFOpContext>(context);
     auto hvd_tensor = std::make_shared<TFTensor>(tensor);
     auto enqueue_result = EnqueueTensorAllgather(
@@ -366,7 +368,7 @@ REGISTER_KERNEL_BUILDER(Name("HorovodAllgather").Device(DEVICE_GPU),
 
 REGISTER_OP("HorovodAllgather")
     .Attr(
-        "T: {uint8, int8, uint16, int16, int32, int64, float32, float64, bool}")
+        "T: {uint8, int8, uint16, int16, int32, int64, float16, float32, float64, bool}")
     .Input("tensor: T")
     .Output("output: T")
     .SetShapeFn([](shape_inference::InferenceContext* c) {
@@ -410,7 +412,7 @@ public:
           context, context->allocate_output(0, tensor.shape(), &output), done);
     }
     // ReadyEvent makes sure input tensor is ready, and output is allocated.
-    auto ready_event = std::shared_ptr<TFReadyEvent>(RecordReadyEvent(context));
+    auto ready_event = std::shared_ptr<common::ReadyEvent>(RecordReadyEvent(context));
     auto hvd_context = std::make_shared<TFOpContext>(context);
     auto hvd_tensor = std::make_shared<TFTensor>(tensor);
     std::shared_ptr<TFTensor> hvd_output = nullptr;
@@ -439,7 +441,7 @@ REGISTER_KERNEL_BUILDER(Name("HorovodBroadcast").Device(DEVICE_GPU),
 
 REGISTER_OP("HorovodBroadcast")
     .Attr(
-        "T: {uint8, int8, uint16, int16, int32, int64, float32, float64, bool}")
+        "T: {uint8, int8, uint16, int16, int32, int64, float16, float32, float64, bool}")
     .Attr("root_rank: int")
     .Input("tensor: T")
     .Output("output: T")

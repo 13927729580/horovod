@@ -1,11 +1,18 @@
 # Horovod
 
-[![Build Status](https://travis-ci.org/uber/horovod.svg?branch=master)](https://travis-ci.org/uber/horovod) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Build Status](https://travis-ci.org/uber/horovod.svg?branch=master)](https://travis-ci.org/uber/horovod) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) [![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fuber%2Fhorovod.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fuber%2Fhorovod?ref=badge_shield) [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/2373/badge)](https://bestpractices.coreinfrastructure.org/projects/2373)
 
 <p align="center"><img src="https://user-images.githubusercontent.com/16640218/34506318-84d0c06c-efe0-11e7-8831-0425772ed8f2.png" alt="Logo" width="200"/></p>
 
-Horovod is a distributed training framework for TensorFlow. The goal of Horovod is to make distributed Deep Learning
-fast and easy to use.
+Horovod is a distributed training framework for TensorFlow, Keras, PyTorch, and MXNet. The goal of Horovod is to make
+distributed Deep Learning fast and easy to use.
+
+<p><img src="https://github.com/LFDLFoundation/artwork/raw/master/lfdl/horizontal/color/lfdl-horizontal-color.png" alt="LF DL" width="200"/></p>
+
+Horovod is hosted by the [Linux Foundation Deep Learning](https://lfdl.io) (LF DL). If you are a company that is deeply
+committed to using open source technologies in artificial intelligence, machine and deep learning, and wanting to support
+the communities of open source projects in these domains, consider joining the LF Deep Learning Foundation. For details
+about who's involved and how Horovod plays a role, read the LF DL [announcement](https://lfdl.io/press/2018/12/13/lf-deep-learning-welcomes-horovod-distributed-training-framework-as-newest-project/).
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
@@ -18,6 +25,8 @@ fast and easy to use.
 - [Running Horovod](#running-horovod)
 - [Keras](#keras)
 - [Estimator API](#estimator-api)
+- [MXNet](#mxnet)
+- [PyTorch](#pytorch)
 - [mpi4py](#mpi4py)
 - [Inference](#inference)
 - [Tensor Fusion](#tensor-fusion)
@@ -35,18 +44,18 @@ fast and easy to use.
 The primary motivation for this project is to make it easy to take a single-GPU TensorFlow program and successfully train
 it on many GPUs faster. This has two aspects:
 
-1. How much modifications does one have to make to a program to make it distributed, and how easy is it to run it.
+1. How much modification does one have to make to a program to make it distributed, and how easy is it to run it.
 2. How much faster would it run in distributed mode?
 
 Internally at Uber we found the MPI model to be much more straightforward and require far less code changes than the
 Distributed TensorFlow with parameter servers. See the [Usage](#usage) section for more details.
 
-In addition to being easy to use, Horovod is fast. Below is a chart representing the benchmark that was done on 32
+In addition to being easy to use, Horovod is fast. Below is a chart representing the benchmark that was done on 128
 servers with 4 Pascal GPUs each connected by RoCE-capable 25 Gbit/s network:
   
-![128-GPU Benchmark](https://user-images.githubusercontent.com/16640218/31681220-7453e760-b32b-11e7-9ba3-6d01f83b7748.png)
+![512-GPU Benchmark](https://user-images.githubusercontent.com/16640218/38965607-bf5c46ca-4332-11e8-895a-b9c137e86013.png)
 
-Horovod achieves 90% scaling efficiency for both Inception V3 and ResNet-101, and 79% scaling efficiency for VGG-16.
+Horovod achieves 90% scaling efficiency for both Inception V3 and ResNet-101, and 68% scaling efficiency for VGG-16.
 See the [Benchmarks](docs/benchmarks.md) page to find out how to reproduce these numbers.
 
 While installing MPI and NCCL itself may seem like an extra hassle, it only needs to be done once by the team dealing
@@ -60,6 +69,9 @@ To install Horovod:
 1. Install [Open MPI](https://www.open-mpi.org/) or another MPI implementation.
 
 Steps to install Open MPI are listed [here](https://www.open-mpi.org/faq/?category=building#easy-build).
+
+**Note**: Open MPI 3.1.3 has an issue that may cause hangs.  It is recommended
+to downgrade to Open MPI 3.1.2 or upgrade to Open MPI 4.0.0.
 
 2. Install the `horovod` pip package.
 
@@ -173,7 +185,12 @@ $ mpirun -np 16 \
 
 3. To run in Docker, see the [Horovod in Docker](docs/docker.md) page.
 
-4. To run in Kubernetes, see [Kubeflow](https://github.com/kubeflow/kubeflow/blob/master/kubeflow/openmpi/README.md).
+4. To run in Kubernetes, see [Kubeflow](https://github.com/kubeflow/kubeflow/blob/master/kubeflow/openmpi/),
+[MPI Operator](https://github.com/kubeflow/mpi-operator/), 
+[Helm Chart](https://github.com/kubernetes/charts/tree/master/stable/horovod/), and 
+[FfDL](https://github.com/IBM/FfDL/tree/master/etc/examples/horovod/).
+
+5. To run in Spark, see the [Spark](docs/spark.md) page.
 
 ## Keras
 
@@ -191,14 +208,107 @@ Horovod supports Estimator API and regular TensorFlow in similar ways.
 
 See a full training [example](examples/tensorflow_mnist_estimator.py).
 
+## MXNet
+
+Horovod supports MXNet and regular TensorFlow in similar ways.
+
+See full training [MNIST](examples/mxnet_mnist.py) and [ImageNet](examples/mxnet_imagenet_resnet50.py) examples.
+
+**Note**: we recommend users to build MXNet from source following this [guide](https://mxnet.incubator.apache.org/install/build_from_source.html) when running Horovod with MXNet on a Linux OS with GCC version 5.X and above. The MXNet shared library distributed through MXNet pip package is currently built using GCC 4.8.4. If we build and install Horovod on a Linux OS with GCC 5.X+ with MXNet pip package, we will hit segmentation fault due to std::function definition change from GCC [4.X](https://github.com/gcc-mirror/gcc/blob/gcc-4_8_4-release/libstdc++-v3/include/std/functional#L2069) to GCC [5.X](https://github.com/gcc-mirror/gcc/blob/gcc-5_4_0-release/libstdc++-v3/include/std/functional#L1854).
+
+```python
+import mxnet as mx
+import horovod.mxnet as hvd
+
+# Initialize Horovod
+hvd.init()
+
+# Pin GPU to be used to process local rank
+context = mx.gpu(hvd.local_rank())
+num_workers = hvd.size()
+
+# Build model
+model = ...
+
+# Define hyper parameters
+optimizer_params = ...
+
+# Add Horovod Distributed Optimizer
+opt = mx.optimizer.create('sgd', sym=model, **optimizer_params)
+opt = hvd.DistributedOptimizer(opt)
+
+(arg_params, aux_params) = model.get_params()
+if arg_params:
+    hvd.broadcast_parameters(arg_params, root_rank=0)
+if aux_params:
+    hvd.broadcast_parameters(aux_params, root_rank=0)
+model.set_params(arg_params=arg_params, aux_params=aux_params)
+
+# Train model
+model.fit(train_data,
+          optimizer=opt,
+          opitmizer_params=optimizer_params,
+          num_epoch=num_epoch)
+
+```
+
+## PyTorch
+
+Horovod supports PyTorch and TensorFlow in similar ways.
+
+Example (also see a full training [example](examples/pytorch_mnist.py)):
+
+```python
+import torch
+import horovod.torch as hvd
+
+# Initialize Horovod
+hvd.init()
+
+# Pin GPU to be used to process local rank (one GPU per process)
+torch.cuda.set_device(hvd.local_rank())
+
+# Define dataset...
+train_dataset = ...
+
+# Partition dataset among workers using DistributedSampler
+train_sampler = torch.utils.data.distributed.DistributedSampler(
+    train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
+
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=..., sampler=train_sampler)
+
+# Build model...
+model = ...
+model.cuda()
+
+optimizer = optim.SGD(model.parameters())
+
+# Add Horovod Distributed Optimizer
+optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
+
+# Broadcast parameters from rank 0 to all other processes.
+hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+
+for epoch in range(100):
+   for batch_idx, (data, target) in enumerate(train_loader):
+       optimizer.zero_grad()
+       output = model(data)
+       loss = F.nll_loss(output, target)
+       loss.backward()
+       optimizer.step()
+       if batch_idx % args.log_interval == 0:
+           print('Train Epoch: {} [{}/{}]\tLoss: {}'.format(
+               epoch, batch_idx * len(data), len(train_sampler), loss.item()))
+```
+
+**Note**: PyTorch support requires NCCL 2.2 or later. It also works with NCCL 2.1.15 if you are not using RoCE or InfiniBand.
+
 ## mpi4py
 
-Horovod supports mixing and matching Horovod collectives with other MPI libraries, such as [mpi4py](mpi4py.scipy.org),
+Horovod supports mixing and matching Horovod collectives with other MPI libraries, such as [mpi4py](https://mpi4py.scipy.org),
 provided that the MPI was built with multi-threading support.
 
 You can check for MPI multi-threading support by querying the `hvd.mpi_threads_supported()` function.
-
-**Note**: Make sure that MPI library will **NOT** re-initialize MPI.  For example:
 
 ```python
 import horovod.tensorflow as hvd
@@ -208,10 +318,6 @@ hvd.init()
 
 # Verify that MPI multi-threading is supported.
 assert hvd.mpi_threads_supported()
-
-# Make sure MPI is not re-initialized.
-import mpi4py.rc
-mpi4py.rc.initialize = False
 
 from mpi4py import MPI
 assert hvd.size() == MPI.COMM_WORLD.Get_size()
@@ -270,4 +376,4 @@ Retrieved from [https://eng.uber.com/horovod/](https://eng.uber.com/horovod/)
 
 The Horovod source code was based off the Baidu [tensorflow-allreduce](https://github.com/baidu-research/tensorflow-allreduce)
 repository written by Andrew Gibiansky and Joel Hestness. Their original work is described in the article
-[Bringing HPC Techniques to Deep Learning](http://research.baidu.com/bringing-hpc-techniques-deep-learning/).
+[Bringing HPC Techniques to Deep Learning](http://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/).

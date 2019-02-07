@@ -18,9 +18,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from contextlib import contextmanager
 import os
-
-import horovod.common as hvd
 
 
 def mpi_env_rank_and_size():
@@ -58,17 +57,21 @@ def mpi_env_rank_and_size():
     return 0, 1
 
 
-def test_horovod_rank():
-    """Test that the rank returned by hvd.rank() is correct."""
-    true_rank, _ = mpi_env_rank_and_size()
-    hvd.init()
-    rank = hvd.rank()
-    assert true_rank == rank
+@contextmanager
+def env(**kwargs):
+    # backup environment
+    backup = {}
+    for k in kwargs.keys():
+        backup[k] = os.environ.get(k)
 
+    # set new values & yield
+    for k, v in kwargs.items():
+        os.environ[k] = v
+    yield
 
-def test_horovod_size():
-    """Test that the size returned by hvd.size() is correct."""
-    _, true_size = mpi_env_rank_and_size()
-    hvd.init()
-    size = hvd.size()
-    assert true_size == size
+    # restore environment
+    for k in kwargs.keys():
+        if backup[k] is not None:
+            os.environ[k] = backup[k]
+        else:
+            del os.environ[k]
